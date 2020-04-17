@@ -32,8 +32,15 @@
 	\item 重复 $N-1$ 次。
 \end{enumerate}
 
-\subsection{DNS 算法}
-
+\subsection{DNS 算法} \label{dns}
+\par 本实验使用\textbf{超立方体结构}实现 DNS 算法。步骤如下：
+\begin{enumerate}[label=\roman*), itemindent=2em]
+	\item $A, B$ 同时在 $k$ 维复制：$A[i,:,:] = A, B[i,:,:] = B$；
+	\item $A$ 在 $j$ 维复制：$A[i,j,:] = A[i,i,:]$；
+	\item $B$ 在 $i$ 维复制：$B[i,:,j] = B[i,:,i]$；
+	\item 各结点做乘法运算；
+	\item 将 $k$ 维各结点求和。\label{dns_sum}
+\end{enumerate}
 
 \section{设计思路与实现}
 
@@ -74,7 +81,7 @@ module cannon(
 
 \begin{figure}[h]
 	\centering
-	\begin{tikzpicture}
+	\begin{tikzpicture}[global scale=0.75]
 		\node[state] (idle) {IDLE};
 		\node[state, right=of idle] (load) {LOAD};
 		\node[state, right=2 of load] (calc) {CALC};
@@ -90,7 +97,7 @@ module cannon(
 	\caption{\texttt{cannon} 模块状态图} \label{cannon_statefig}
 \end{figure}
 
-\par 每个状态的动作如\tabref{cannon_statetab} 所示。
+
 \begin{table}[h]
 	\centering
 	\caption{\texttt{cannon} 模块状态表} \label{cannon_statetab}
@@ -109,8 +116,129 @@ module cannon(
 		\hline
 	\end{tabular}
 \end{table}
+\par 每个状态的动作如\tabref{cannon_statetab} 所示。
 
 \par 详细代码见 \texttt{cannon.v}。
+
+\newpage
+\subsection{DNS 算法}
+\subsubsection{dns\_unit 模块}
+\par 首先设计超立方体的每个结点模块。
+\begin{lstlisting}[language=verilog]
+module dns_unit(
+	input wire clk,
+	input wire rst,
+	input wire broadx[7:0],
+	input wire broady[7:0],
+	input wire broadz[7:0],
+
+	output reg a[7:0],
+	output reg b[7:0],
+	output reg s[7:0]
+);
+\end{lstlisting}
+\par 其中 \texttt{broadx, broady, broadz} 用于三个方向上的播送， \texttt{a, b, s} 存储矩阵数据和结果。
+\par 模块是一个状态机，状态转移如\figref{dns_statefig} 所示。
+\begin{figure}[h]
+	\centering
+	\begin{tikzpicture}[global scale=0.75]
+		\node[state] (copya) {COPYA};
+		\node[state, right=of copya] (copyb) {COPYB};
+		\node[state, right=of copyb] (broad) {BROAD};
+		\node[state, right=of broad] (mul) {MUL};
+		\node[state, right=of mul] (sum) {SUM};		
+		\path[arrow] (copya) edge (copyb);
+		\path[arrow] (copyb) edge (broad);
+		\path[arrow] (broad) edge (mul);
+		\path[arrow] (mul) edge (sum);
+		\path[arrow] (sum) edge [loop] [above] node {rst=0} (sum);
+		\path[arrow] (sum.south) edge [bend left] [below] node {rst=1} (copya.south);
+	\end{tikzpicture}
+	\caption{\texttt{dns\_unit} 模块状态图} \label{dns_unit_statefig}
+\end{figure}
+
+\par 每个状态描述如\tabref{dns_unit_statetab} 所示。
+
+\begin{table}[h]
+	\centering
+	\caption{\texttt{dns\_unit} 模块状态表} \label{dns_unit_statetab}
+	\vspace{1ex}
+	\begin{tabular}{cc}
+		\hline
+		状态 & 描述 \\
+		\hline
+		\texttt{COPYA} & \texttt{a = broadz} \\
+		\hline
+		\texttt{COPYB} & \texttt{b = broadz} \\
+		\hline
+		\texttt{BROAD} & \makecell{\texttt{a = broady} \\ \texttt{b = broadx}} \\
+		\hline
+		\texttt{MUL} & \texttt{s = a * b} \\
+		\hline
+		\texttt{SUM} & - \\
+		\hline
+	\end{tabular}
+\end{table}
+
+\newpage
+\subsubsection{dns 模块}
+\begin{lstlisting}[language=verilog]
+module dns(
+	input wire clk,
+	input wire rst,
+	input wire A[3:0][3:0][7:0],
+	input wire B[3:0][3:0][7:0],
+	output reg S[3:0][3:0][7:0],
+	output reg finished
+);
+\end{lstlisting}
+\par \texttt{dns} 模块包含 64 个 \texttt{dns\_unit} 模块，以如下形式插入。
+\begin{lstlisting}[language=verilog]
+reg [7:0] broadx[3:0][3:0];
+reg [7:0] broady[3:0][3:0];
+reg [7:0] broadz[3:0][3:0];
+
+wire [7:0] a[3:0][3:0][3:0];
+wire [7:0] b[3:0][3:0][3:0];
+wire [7:0] s[3:0][3:0][3:0];
+
+dns_unit m_zyx(
+	.clk(clk_unit),
+	.rst(rst_unit),
+	.broadx(broadx[y][z]),
+	.broady(broady[z][x]),
+	.broadz(broadz[x][y]),
+
+	.a(a[z][y][x]),
+	.b(b[z][y][x]),
+	.s(s[z][y][x])
+);
+\end{lstlisting}
+
+\par 此外 \texttt{dns} 模块同样用状态机实现，且状态转移与 \texttt{dns\_unit} 相同，其状态描述如\tabref{dns_statetab} 所示。
+
+\begin{table}[h]
+	\centering
+	\caption{\texttt{dns} 模块状态表} \label{dns_statetab}
+	\vspace{1ex}
+	\begin{tabular}{cc}
+		\hline
+		状态 & 描述 \\
+		\hline
+		\texttt{COPYA} & \texttt{broadz[i][j] = A[i][j]} \\
+		\hline
+		\texttt{COPYB} & \texttt{broadz[i][j] = B[i][j]} \\
+		\hline
+		\texttt{BROAD} & \makecell{\texttt{broady[i][j] = a[i][i][j]} \\ \texttt{broadx[i][j] = b[j][i][j]}} \\
+		\hline
+		\texttt{MUL} & - \\
+		\hline
+		\texttt{SUM} & \texttt{S[i][j] = sum(s[:][j][i])} \\
+		\hline
+	\end{tabular}
+\end{table}
+
+\par 由此，\texttt{dns} 模块在每个状态为播送通道（\texttt{broadx, broady, broadz}）决定不同的值，以达到实现 DNS 算法的目的。
 
 \section{评价}
 \subsection{Cannon 算法}
@@ -129,12 +257,12 @@ $$
 \par Cannon 算法的不足之处在于，数据初始化需要 $k-1$ 次的循环位移，在本实验中，由于规模不大，可以通过直接在代码中交换输入实现加速，但在大规模矩阵运算中仍然有这一方面的劣势。
 
 \subsection{DNS 算法}
-
+\par 相较于 Cannon 算法，DNS 算法不仅使用了更多的结点（$n^3$），同时加入了\textbf{播送}的特性。通过播送，类似 Cannon 算法中初始化的步骤可以在一个通信周期内完成，使得所有数据传送并行进行，大大加快了计算速度。此外，每个结点的乘法运算也是并行进行。因此，DNS 算法复杂度主要集中在步骤 \ref{dns_sum} 求和阶段。结果矩阵的每一个元素并行地计算 $n$ 个数的和，而计算 $n$ 个数的和也可以在超立方体的框架下并行，因此复杂度为 $O(logn)$。
 
 \section{$N \times N$ 矩阵乘法设计}
 \subsection{Cannon 算法}
 \par Cannon 算法是容易推广的——尽管本实验每个结点仅处理两个数的运算，但在实际使用中可以令每个结点处理两个小矩阵的运算，即 Cannon 算法描述中的\textbf{分块}。然而如此一来，如何对大矩阵进行分块，分块方式不同对运算复杂度是否有影响，就成为应该思考的问题。此外，本实验使用 verilog 设计 $4 \times 4$ 矩阵乘法，而对于高阶矩阵乘法，我们为它不可能设计新的硬件，应该以小模块为基础，利用高层的并行算法（如 MPI）实现高阶矩阵乘法。
-\par 假设已有用 Cannon 算法处理 $S$ 阶矩阵乘法的结点 $P$。由于任何 $S'(<S)$ 阶矩阵，我们可以通过补零的方式用 $P$ 计算。因此对于 $N(>S)$ 阶矩阵，我们可以将其补成 $N'$ 阶矩阵，其中
+\par 假设已有用 Cannon 算法计算 $S$ 阶矩阵乘法的结点 $P$。由于任何 $S'(<S)$ 阶矩阵，我们可以通过补零的方式用 $P$ 计算。因此对于 $N(>S)$ 阶矩阵，我们可以将其补成 $N'$ 阶矩阵，其中
 $$
 	N' = \lceil\frac{N}{S}\rceil S = kS
 $$
@@ -152,8 +280,13 @@ $$
 \par 从以上可以看出，使用法一所带来的性能损失仅为 $O(S)$，因此我们可以使用法一扩展 Cannon 算法。
 
 \subsection{DNS 算法}
-
-
+\par DNS 算法也可以像 Cannon 算法那样推广。
+\par 假设已有用 DNS 算法计算 $S$ 阶矩阵乘法的结点 $P$。易得
+\begin{align*}
+	T &= O(logS) + O(logk) \\
+	  &= O(log(\lceil\frac{N}{S}\rceil S))
+\end{align*}
+\par 即使用 DNS 结点组成高层 DNS 网络带来的性能损失为 $O(log(S))$，代价依旧很小。因此我们也可以使用这样的方法扩展 DNS 算法。
 
 \end{document}
 
