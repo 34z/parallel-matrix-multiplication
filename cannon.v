@@ -36,7 +36,7 @@ module cannon(
 	parameter END  = 3;
 	reg [1:0] state;
 	reg [1:0] calc_cnt;
-	always @(posedge clk or posedge rst) begin
+	always @(posedge clk) begin
 		case (state)
 			IDLE: begin 
 				state <= LOAD;
